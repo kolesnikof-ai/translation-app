@@ -205,7 +205,7 @@ Item {
 
   // The omarchy-translate command pushes finished results here. "closed"
   // tells it the user dismissed the panel while the request was running.
-  ShellIpc {
+  IpcHandler {
     target: "translate"
 
     function show(payloadJson: string): string {
@@ -223,12 +223,17 @@ Item {
     }
   }
 
-  OverlayWindow {
+  PanelWindow {
     id: window
-    shown: root.opened
+    visible: root.opened
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    exclusionMode: ExclusionMode.Ignore
     WlrLayershell.namespace: "omarchy-translate"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: root.opened ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
-    onContentRevealedChanged: if (contentRevealed) root.focusKeys()
+    onVisibleChanged: if (visible) root.focusKeys()
 
     readonly property var geometry: Model.cardGeometry({
       position: String(root.ui.position || "cursor"),

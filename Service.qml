@@ -1,4 +1,6 @@
 import QtQuick
+import Quickshell
+import Quickshell.Io
 import qs.Commons
 
 // Headless half of the plugin. It remembers the latest payload the panel
@@ -15,7 +17,7 @@ Item {
 
   property string lastPayload: ""
 
-  ShellIpc {
+  IpcHandler {
     target: "translate-service"
 
     function last(): string {
