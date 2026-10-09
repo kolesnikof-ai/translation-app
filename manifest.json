@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "translate.lookup",
+  "name": "Translate",
+  "version": "0.1.0",
+  "author": "kolesnikof-ai",
+  "license": "MIT",
+  "description": "Translate the selected text (or typed input) with one configured provider: DeepL, Microsoft, Google, Yandex or LibreTranslate.",
+  "kinds": ["panel", "service"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "panel": "Panel.qml",
+    "service": "Service.qml"
+  }
+}
