@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import Quickshell
+import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
 import qs.Commons as Commons
@@ -29,6 +30,19 @@ Item {
   // Settings forwarded by the command with every summon.
   property var ui: ({})
   property var cursorPos: null
+  property string baseSource: "auto"
+  property string baseTarget: "ru"
+
+  // Languages picked in the switcher. They last until the panel is closed and
+  // never touch the config file. Empty means "use the configured value".
+  property string userSource: ""
+  property string userTarget: ""
+  property int requestSeq: 0
+
+  readonly property bool switcherEnabled: ui.show_language_switcher === true
+  readonly property string cliPath: decodeURIComponent(String(Qt.resolvedUrl("bin/omarchy-translate")).replace(/^file:\/\//, ""))
+  readonly property string shownSource: userSource || baseSource
+  readonly property string shownTarget: userTarget || (hasResult ? result.target : baseTarget)
 
   readonly property color foreground: Commons.Color.popups.text
   readonly property color accent: Commons.Color.accent
@@ -50,6 +64,10 @@ Item {
     var p = Model.parseJson(payloadJson) || {}
     root.ui = p.ui || {}
     root.cursorPos = p.cursor || null
+    root.baseSource = p.source || "auto"
+    root.baseTarget = p.target || "ru"
+    root.userSource = ""
+    root.userTarget = ""
     root.requestId = p.request_id || ""
     root.sourceText = p.source_text || ""
     root.applyPayload(p)
@@ -73,12 +91,92 @@ Item {
     root.applyPayload(p)
   }
 
+  // Runs `omarchy-translate --stdin` for TEXT with the languages picked in the
+  // switcher. Each request gets its own process so a late answer for an older
+  // request can never overwrite a newer one.
+  function translate(text) {
+    var trimmed = String(text || "").trim()
+    if (trimmed === "") return
+    var args = []
+    if (root.userSource) args.push("--from", root.userSource)
+    if (root.userTarget) args.push("--to", root.userTarget)
+    root.requestSeq += 1
+    root.requestId = "panel-" + Date.now() + "-" + root.requestSeq
+    root.sourceText = trimmed
+    root.result = null
+    root.errorInfo = null
+    root.phase = "loading"
+    var proc = commandComponent.createObject(root, { reqId: root.requestId, text: trimmed, extraArgs: args })
+    proc.running = true
+  }
+
+  function finishRequest(reqId, output, exitCode) {
+    if (reqId !== root.requestId || root.phase !== "loading") return
+    var parsed = Model.parseCommandOutput(output, exitCode)
+    root.result = parsed.result || null
+    root.errorInfo = parsed.error || null
+    root.phase = parsed.state
+  }
+
+  function retranslate() {
+    if (root.sourceText !== "") root.translate(root.sourceText)
+  }
+
+  function setSource(code) {
+    root.userSource = code
+    root.retranslate()
+  }
+
+  function setTarget(code) {
+    root.userTarget = code
+    root.retranslate()
+  }
+
+  // Exchange the two languages. The detected language stands in for "auto".
+  function swapLanguages() {
+    var from = root.shownSource === "auto" && root.hasResult ? root.result.detected : root.shownSource
+    var to = root.shownTarget
+    if (!from || from === "auto") return
+    root.userSource = to
+    root.userTarget = from
+    root.retranslate()
+  }
+
   function scrollBy(delta) {
     var max = Math.max(0, flick.contentHeight - flick.height)
     flick.contentY = Util.clamp(flick.contentY + delta, 0, max)
   }
 
   Component.onDestruction: if (root.service) root.service.panelOpen = false
+
+  Component {
+    id: commandComponent
+
+    Process {
+      id: proc
+      property string reqId: ""
+      property string text: ""
+      property var extraArgs: []
+      property bool delivered: false
+
+      command: ["bash", "-c", "printf %s \"$1\" | \"$2\" --stdin \"${@:3}\"", "omarchy-translate", proc.text, root.cliPath].concat(proc.extraArgs)
+
+      stdout: StdioCollector {
+        id: collector
+        onStreamFinished: {
+          proc.delivered = true
+          root.finishRequest(proc.reqId, collector.text, 0)
+        }
+      }
+
+      onExited: function(exitCode) {
+        Qt.callLater(function() {
+          if (!proc.delivered) root.finishRequest(proc.reqId, collector.text, exitCode)
+          proc.destroy()
+        })
+      }
+    }
+  }
 
   Connections {
     target: root.service
@@ -149,10 +247,45 @@ Item {
         }
       }
 
+      Row {
+        id: langRow
+        visible: root.switcherEnabled
+        x: card.contentLeftInset
+        y: card.contentTopInset
+        width: card.width - card.contentLeftInset - card.contentRightInset
+        spacing: Style.spacing.rowGap
+
+        SearchableDropdown {
+          width: (parent.width - swapButton.width - parent.spacing * 2) / 2
+          showLabel: false
+          options: Model.languageOptions(true)
+          value: root.shownSource
+          triggerLabel: root.shownSource === "auto" && root.hasResult
+            ? "Auto (" + Model.languageName(root.result.detected) + ")" : ""
+          onChanged: function(code) { root.setSource(code) }
+        }
+
+        Button {
+          id: swapButton
+          anchors.verticalCenter: parent.verticalCenter
+          text: "\u21C4"
+          tooltipText: "Swap languages"
+          onClicked: root.swapLanguages()
+        }
+
+        SearchableDropdown {
+          width: (parent.width - swapButton.width - parent.spacing * 2) / 2
+          showLabel: false
+          options: Model.languageOptions(false)
+          value: root.shownTarget
+          onChanged: function(code) { root.setTarget(code) }
+        }
+      }
+
       Flickable {
         id: flick
         anchors.fill: parent
-        anchors.topMargin: card.contentTopInset
+        anchors.topMargin: card.contentTopInset + (langRow.visible ? langRow.height + Style.spacing.rowGap : 0)
         anchors.rightMargin: card.contentRightInset
         anchors.bottomMargin: card.contentBottomInset
         anchors.leftMargin: card.contentLeftInset
@@ -169,7 +302,7 @@ Item {
 
           Text {
             width: parent.width
-            visible: root.hasResult
+            visible: root.hasResult && !root.switcherEnabled
             textFormat: Text.PlainText
             text: root.hasResult
               ? Model.languageName(root.result.detected) + "  →  " + Model.languageName(root.result.target)
