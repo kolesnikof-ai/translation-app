@@ -65,11 +65,13 @@ http::transport_fail() {
   tr::error network "Cannot reach $1: $HTTP_ERROR"
 }
 
-# http::extract LABEL JQ_FILTER -> prints JQ_FILTER applied to the response body.
-# An unparsable or unexpected body becomes an error object and a failure.
+# http::extract LABEL JQ_FILTER [JQ_ARGS...] -> prints JQ_FILTER applied to the
+# response body. An unparsable or unexpected body becomes an error object and
+# a failure.
 http::extract() {
   local label=$1 filter=$2 out
-  if ! out=$(jq -ce "$filter" <<<"$HTTP_BODY" 2>/dev/null); then
+  shift 2
+  if ! out=$(jq -ce "$@" "$filter" <<<"$HTTP_BODY" 2>/dev/null); then
     tr::error network "$label returned an unexpected response"
     return 1
   fi
