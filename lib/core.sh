@@ -49,10 +49,21 @@ core::cap_variants() {
     .senses |= (map(.variants |= .[:$max]) | map(select(.variants | length > 0)))' <<<"$1"
 }
 
+# core::cache_key PROVIDER SRC DST EXPLICIT TEXT -> cache key covering every
+# setting that changes the answer: the language pair, whether the fallback
+# target may apply (and which one) and DeepL's formality.
+core::cache_key() {
+  local provider=$1 src=$2 dst=$3 explicit=$4 text=$5 extra
+  extra="explicit=$explicit"
+  [[ $explicit == 1 ]] || extra+=";fallback=$(config::get '.fallback_target // ""')"
+  [[ $provider != deepl ]] || extra+=";formality=$(config::get '.deepl_formality // "default"')"
+  cache::key "$provider" "$src" "$dst" "$extra" "$text"
+}
+
 # core::run TEXT FROM_OVERRIDE TO_OVERRIDE
 # Prints the final result object (or an error object) and returns 0 on success.
 core::run() {
-  local text=$1 from=$2 to=$3 provider src dst explicit=0 translated kind senses detected max result
+  local text=$1 from=$2 to=$3 provider src dst explicit=0 translated kind senses detected max result key
 
   provider=$(config::get '.provider')
   provider::load "$provider" || return 1
@@ -71,6 +82,16 @@ core::run() {
   }
   [[ -n $to ]] && explicit=1
 
+  max=$(config::get '.ui.max_variants // 5')
+  [[ $max =~ ^[0-9]+$ && $max -gt 0 ]] || max=5
+
+  key=$(core::cache_key "$provider" "$src" "$dst" "$explicit" "$text")
+  if result=$(cache::get "$key"); then
+    cache::save_last "$result"
+    core::cap_variants "$result" "$max"
+    return 0
+  fi
+
   translated=$(core::translate "$text" "$src" "$dst" "$explicit") || {
     printf '%s' "$translated"
     return 1
@@ -81,9 +102,6 @@ core::run() {
   kind=$(classify::kind "$text")
   senses='[]'
   [[ $kind == word ]] && senses=$(core::senses "$text" "$detected" "$dst")
-
-  max=$(config::get '.ui.max_variants // 5')
-  [[ $max =~ ^[0-9]+$ && $max -gt 0 ]] || max=5
 
   result=$(jq -cn --arg source "$text" --arg kind "$kind" --arg provider "$provider" \
     --argjson translated "$translated" --argjson senses "$senses" '
@@ -97,5 +115,7 @@ core::run() {
       senses: $senses
     }')
 
+  cache::put "$key" "$result"
+  cache::save_last "$result"
   core::cap_variants "$result" "$max"
 }

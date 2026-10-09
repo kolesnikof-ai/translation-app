@@ -12,7 +12,7 @@ VERSION="0.1.0"
 # the real location before loading the libraries next to it.
 TR_ROOT=$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")
 
-for lib in common config lang http classify provider selection ui core; do
+for lib in common config lang http classify cache provider selection ui core; do
   # shellcheck source=/dev/null
   source "$TR_ROOT/lib/$lib.sh"
 done
@@ -111,6 +111,13 @@ case $mode in
     status=$?
     printf '%s\n' "$result"
     exit "$status"
+    ;;
+  copy)
+    if ! text=$(cache::last_translation) || [[ -z $text ]]; then
+      tr::notify "Nothing to copy yet"
+      exit 1
+    fi
+    printf '%s' "$text" | wl-copy
     ;;
   input)
     ui::summon "$(ui::payload input "$(new_request_id)" "" "" "" "$(ui::cursor)")"
