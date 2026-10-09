@@ -1,0 +1,8 @@
+#!/bin/bash
+# Mock wl-copy: stores stdin in $MOCK_DIR/clipboard (--clear removes it).
+if [[ ${1:-} == --clear ]]; then
+  rm -f "$MOCK_DIR/clipboard"
+else
+  cat >"$MOCK_DIR/clipboard"
+fi
+echo "wl-copy $*" >>"$MOCK_DIR/wl-copy.log"

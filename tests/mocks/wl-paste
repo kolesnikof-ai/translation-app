@@ -1,0 +1,6 @@
+#!/bin/bash
+# Mock wl-paste: reads $MOCK_DIR/primary or $MOCK_DIR/clipboard; exits 1 when absent.
+file=clipboard
+for arg in "$@"; do [[ $arg == --primary ]] && file=primary; done
+[[ -f $MOCK_DIR/$file ]] || { echo "Nothing is copied" >&2; exit 1; }
+cat "$MOCK_DIR/$file"

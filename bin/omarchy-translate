@@ -1,0 +1,132 @@
+#!/bin/bash
+
+# omarchy:summary=Translate the selected text (or typed input) in the Translate panel
+# omarchy:args=[--stdin] [--input] [--copy] [--from <code>] [--to <code>]
+# omarchy:examples=omarchy-translate | echo hello | omarchy-translate --stdin --to de
+
+set -uo pipefail
+
+VERSION="0.1.0"
+
+# The command is usually reached through a symlink in ~/.local/bin, so resolve
+# the real location before loading the libraries next to it.
+TR_ROOT=$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")
+
+for lib in common config lang http classify cache provider selection ui core; do
+  # shellcheck source=/dev/null
+  source "$TR_ROOT/lib/$lib.sh"
+done
+
+usage() {
+  cat <<USAGE
+Usage: omarchy-translate [options]
+
+Without options the current text selection is translated and shown in the
+Translate panel. When nothing is selected the panel opens with an input field.
+
+Options:
+  --stdin        Translate text from standard input and print the result as JSON
+  --input        Open the panel with an empty input field, ignoring the selection
+  --copy         Copy the last translation to the clipboard
+  --from CODE    Source language (ISO 639-1, or "auto")
+  --to CODE      Target language (ISO 639-1); disables the fallback target
+  -h, --help     Show this help
+  --version      Show the version
+
+Configuration: $(config::path)
+USAGE
+}
+
+mode="selection"
+from=""
+to=""
+
+while (($#)); do
+  case $1 in
+    --stdin) mode="stdin" ;;
+    --input) mode="input" ;;
+    --copy) mode="copy" ;;
+    --from)
+      from=${2:-}
+      [[ -n $from ]] || { echo "omarchy-translate: --from needs a value" >&2; exit 2; }
+      shift
+      ;;
+    --to)
+      to=${2:-}
+      [[ -n $to ]] || { echo "omarchy-translate: --to needs a value" >&2; exit 2; }
+      shift
+      ;;
+    -h | --help) usage; exit 0 ;;
+    --version) echo "$VERSION"; exit 0 ;;
+    *) echo "omarchy-translate: unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+new_request_id() {
+  printf '%s-%s' "$(date +%s%N)" "$$"
+}
+
+# Hotkey flow: show the panel immediately, translate, then hand the result over.
+run_selection() {
+  local text request_id cursor result status=0
+
+  text=$(selection::read)
+  cursor=$(ui::cursor)
+  request_id=$(new_request_id)
+
+  if [[ -z $text ]]; then
+    ui::summon "$(ui::payload input "$request_id" "" "" "" "$cursor")"
+    return $?
+  fi
+
+  ui::summon "$(ui::payload loading "$request_id" "$text" "" "" "$cursor")" || return 1
+
+  result=$(core::run "$text" "$from" "$to") || status=1
+  if ((status)) || tr::is_error "$result"; then
+    ui::deliver "$(ui::payload error "$request_id" "$text" error "$result" "$cursor")"
+    return 1
+  fi
+  ui::deliver "$(ui::payload result "$request_id" "$text" result "$result" "$cursor")"
+}
+
+if ! config::load; then
+  TR_CONFIG=$TR_CONFIG_DEFAULTS
+  if [[ $mode == stdin ]]; then
+    printf '%s\n' "$TR_CONFIG_ERROR"
+  else
+    ui::summon "$(ui::payload error "$(new_request_id)" "" error "$TR_CONFIG_ERROR" null)"
+  fi
+  exit 1
+fi
+
+case $mode in
+  stdin)
+    text=$(tr::trim "$(cat)")
+    if [[ -z $text ]]; then
+      echo "omarchy-translate: no text given on standard input" >&2
+      exit 2
+    fi
+    result=$(core::run "$text" "$from" "$to")
+    status=$?
+    printf '%s\n' "$result"
+    exit "$status"
+    ;;
+  copy)
+    if ! text=$(cache::last_translation) || [[ -z $text ]]; then
+      tr::notify "Nothing to copy yet"
+      exit 1
+    fi
+    printf '%s' "$text" | wl-copy
+    ;;
+  input)
+    ui::summon "$(ui::payload input "$(new_request_id)" "" "" "" "$(ui::cursor)")"
+    ;;
+  selection)
+    run_selection
+    ;;
+  *)
+    echo "omarchy-translate: mode '$mode' is not implemented yet" >&2
+    exit 2
+    ;;
+esac

@@ -1,0 +1,9 @@
+#!/bin/bash
+# Mock omarchy-shell: logs every call and answers with canned replies.
+printf '%s\n' "$*" >>"$MOCK_DIR/shell.log"
+if [[ $1 == shell && $2 == summon ]]; then
+  echo "${MOCK_SUMMON_REPLY:-ok}"
+elif [[ $1 == translate && $2 == show ]]; then
+  [[ -n ${MOCK_SHOW_FAIL:-} ]] && exit 1
+  echo "${MOCK_SHOW_REPLY:-ok}"
+fi
