@@ -38,6 +38,7 @@ Item {
   property string userSource: ""
   property string userTarget: ""
   property int requestSeq: 0
+  property bool copied: false
 
   readonly property bool switcherEnabled: ui.show_language_switcher === true
   readonly property string cliPath: decodeURIComponent(String(Qt.resolvedUrl("bin/omarchy-translate")).replace(/^file:\/\//, ""))
@@ -142,9 +143,25 @@ Item {
     root.retranslate()
   }
 
+  // Super+C is rebound by Omarchy to "universal copy": the compositor sends
+  // Ctrl+C (Ctrl+Shift+C over a terminal) to the focused surface, so both land
+  // here as an ordinary key press.
+  function copyTranslation() {
+    if (!root.hasResult || !root.result.translation) return
+    Quickshell.execDetached(["bash", "-c", "printf %s \"$1\" | wl-copy", "omarchy-translate", root.result.translation])
+    root.copied = true
+    copiedTimer.restart()
+  }
+
   function scrollBy(delta) {
     var max = Math.max(0, flick.contentHeight - flick.height)
     flick.contentY = Util.clamp(flick.contentY + delta, 0, max)
+  }
+
+  Timer {
+    id: copiedTimer
+    interval: 1400
+    onTriggered: root.copied = false
   }
 
   Component.onDestruction: if (root.service) root.service.panelOpen = false
@@ -230,6 +247,9 @@ Item {
         Keys.onPressed: function(event) {
           if (event.key === Qt.Key_Escape) {
             root.close()
+            event.accepted = true
+          } else if (event.key === Qt.Key_C && (event.modifiers & (Qt.ControlModifier | Qt.MetaModifier))) {
+            root.copyTranslation()
             event.accepted = true
           } else if (event.key === Qt.Key_PageDown) {
             root.scrollBy(flick.height * 0.9)
@@ -335,16 +355,33 @@ Item {
             font.pixelSize: Style.font.title
           }
 
-          Text {
+          Item {
             width: parent.width
+            height: Math.max(translationText.implicitHeight, copyButton.implicitHeight)
             visible: root.hasResult
-            textFormat: Text.PlainText
-            text: root.hasResult ? root.result.translation : ""
-            wrapMode: Text.Wrap
-            color: root.foreground
-            font.family: Style.font.family
-            font.pixelSize: Style.font.heading
-            font.bold: true
+
+            Text {
+              id: translationText
+              anchors.left: parent.left
+              anchors.right: copyButton.left
+              anchors.rightMargin: Style.spacing.rowGap
+              textFormat: Text.PlainText
+              text: root.hasResult ? root.result.translation : ""
+              wrapMode: Text.Wrap
+              color: root.foreground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.heading
+              font.bold: true
+            }
+
+            Button {
+              id: copyButton
+              anchors.right: parent.right
+              anchors.top: parent.top
+              iconText: root.copied ? Model.glyph(0xF012C) : Model.glyph(0xF018F)
+              tooltipText: root.copied ? "Copied" : "Copy translation (Super+C)"
+              onClicked: root.copyTranslation()
+            }
           }
 
           Column {
