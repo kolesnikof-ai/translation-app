@@ -39,6 +39,8 @@ Item {
   property string userTarget: ""
   property int requestSeq: 0
   property bool copied: false
+  // The panel was opened without a selection: show the input field.
+  property bool inputMode: false
 
   readonly property bool switcherEnabled: ui.show_language_switcher === true
   readonly property string cliPath: decodeURIComponent(String(Qt.resolvedUrl("bin/omarchy-translate")).replace(/^file:\/\//, ""))
@@ -71,6 +73,8 @@ Item {
     root.userTarget = ""
     root.requestId = p.request_id || ""
     root.sourceText = p.source_text || ""
+    root.inputMode = p.state === "input"
+    inputBox.text = ""
     root.applyPayload(p)
     root.opened = true
     if (root.service) root.service.panelOpen = true
@@ -83,7 +87,9 @@ Item {
   }
 
   function focusKeys() {
-    if (root.opened) keys.forceActiveFocus()
+    if (!root.opened) return
+    if (root.inputMode) inputBox.forceActiveFocus()
+    else keys.forceActiveFocus()
   }
 
   function onDelivered(payloadJson) {
@@ -245,10 +251,12 @@ Item {
         focus: true
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
+          var typing = inputBox.activeFocus
           if (event.key === Qt.Key_Escape) {
             root.close()
             event.accepted = true
           } else if (event.key === Qt.Key_C && (event.modifiers & (Qt.ControlModifier | Qt.MetaModifier))) {
+            if (typing && inputBox.selectedText.length > 0) return
             root.copyTranslation()
             event.accepted = true
           } else if (event.key === Qt.Key_PageDown) {
@@ -257,185 +265,192 @@ Item {
           } else if (event.key === Qt.Key_PageUp) {
             root.scrollBy(-flick.height * 0.9)
             event.accepted = true
-          } else if (event.key === Qt.Key_Down) {
+          } else if (event.key === Qt.Key_Down && !typing) {
             root.scrollBy(Style.space(40))
             event.accepted = true
-          } else if (event.key === Qt.Key_Up) {
+          } else if (event.key === Qt.Key_Up && !typing) {
             root.scrollBy(-Style.space(40))
             event.accepted = true
           }
         }
-      }
 
-      Row {
-        id: langRow
-        visible: root.switcherEnabled
-        x: card.contentLeftInset
-        y: card.contentTopInset
-        width: card.width - card.contentLeftInset - card.contentRightInset
-        spacing: Style.spacing.rowGap
-
-        SearchableDropdown {
-          width: (parent.width - swapButton.width - parent.spacing * 2) / 2
-          showLabel: false
-          options: Model.languageOptions(true)
-          value: root.shownSource
-          triggerLabel: root.shownSource === "auto" && root.hasResult
-            ? "Auto (" + Model.languageName(root.result.detected) + ")" : ""
-          onChanged: function(code) { root.setSource(code) }
-        }
-
-        Button {
-          id: swapButton
-          anchors.verticalCenter: parent.verticalCenter
-          text: "\u21C4"
-          tooltipText: "Swap languages"
-          onClicked: root.swapLanguages()
-        }
-
-        SearchableDropdown {
-          width: (parent.width - swapButton.width - parent.spacing * 2) / 2
-          showLabel: false
-          options: Model.languageOptions(false)
-          value: root.shownTarget
-          onChanged: function(code) { root.setTarget(code) }
-        }
-      }
-
-      Flickable {
-        id: flick
-        anchors.fill: parent
-        anchors.topMargin: card.contentTopInset + (langRow.visible ? langRow.height + Style.spacing.rowGap : 0)
-        anchors.rightMargin: card.contentRightInset
-        anchors.bottomMargin: card.contentBottomInset
-        anchors.leftMargin: card.contentLeftInset
-        contentWidth: width
-        contentHeight: content.implicitHeight
-        clip: true
-        boundsBehavior: Flickable.StopAtBounds
-        ScrollBar.vertical: ScrollBar {}
-
-        Column {
-          id: content
-          width: flick.width
+        Row {
+          id: langRow
+          visible: root.switcherEnabled
+          x: card.contentLeftInset
+          y: card.contentTopInset
+          width: card.width - card.contentLeftInset - card.contentRightInset
           spacing: Style.spacing.rowGap
 
-          Text {
-            width: parent.width
-            visible: root.hasResult && !root.switcherEnabled
-            textFormat: Text.PlainText
-            text: root.hasResult
-              ? Model.languageName(root.result.detected) + "  →  " + Model.languageName(root.result.target)
-                + "  ·  " + root.result.provider
-              : ""
-            color: root.muted
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-            elide: Text.ElideRight
+          SearchableDropdown {
+            width: (parent.width - swapButton.width - parent.spacing * 2) / 2
+            showLabel: false
+            options: Model.languageOptions(true)
+            value: root.shownSource
+            triggerLabel: root.shownSource === "auto" && root.hasResult
+              ? "Auto (" + Model.languageName(root.result.detected) + ")" : ""
+            onChanged: function(code) { root.setSource(code) }
           }
 
-          Text {
-            width: parent.width
-            visible: root.sourceText !== ""
-            textFormat: Text.PlainText
-            text: root.sourceText
-            wrapMode: Text.Wrap
-            color: root.muted
-            font.family: Style.font.family
-            font.pixelSize: Style.font.body
+          Button {
+            id: swapButton
+            anchors.verticalCenter: parent.verticalCenter
+            text: "\u21C4"
+            tooltipText: "Swap languages"
+            onClicked: root.swapLanguages()
           }
 
-          Text {
-            width: parent.width
-            visible: root.phase === "loading"
-            textFormat: Text.PlainText
-            text: "Translating…"
-            color: root.accent
-            font.family: Style.font.family
-            font.pixelSize: Style.font.title
+          SearchableDropdown {
+            width: (parent.width - swapButton.width - parent.spacing * 2) / 2
+            showLabel: false
+            options: Model.languageOptions(false)
+            value: root.shownTarget
+            onChanged: function(code) { root.setTarget(code) }
           }
+        }
 
-          Item {
-            width: parent.width
-            height: Math.max(translationText.implicitHeight, copyButton.implicitHeight)
-            visible: root.hasResult
-
-            Text {
-              id: translationText
-              anchors.left: parent.left
-              anchors.right: copyButton.left
-              anchors.rightMargin: Style.spacing.rowGap
-              textFormat: Text.PlainText
-              text: root.hasResult ? root.result.translation : ""
-              wrapMode: Text.Wrap
-              color: root.foreground
-              font.family: Style.font.family
-              font.pixelSize: Style.font.heading
-              font.bold: true
-            }
-
-            Button {
-              id: copyButton
-              anchors.right: parent.right
-              anchors.top: parent.top
-              iconText: root.copied ? Model.glyph(0xF012C) : Model.glyph(0xF018F)
-              tooltipText: root.copied ? "Copied" : "Copy translation (Super+C)"
-              onClicked: root.copyTranslation()
-            }
-          }
+        Flickable {
+          id: flick
+          anchors.fill: parent
+          anchors.topMargin: card.contentTopInset + (langRow.visible ? langRow.height + Style.spacing.rowGap : 0)
+          anchors.rightMargin: card.contentRightInset
+          anchors.bottomMargin: card.contentBottomInset
+          anchors.leftMargin: card.contentLeftInset
+          contentWidth: width
+          contentHeight: content.implicitHeight
+          clip: true
+          boundsBehavior: Flickable.StopAtBounds
+          ScrollBar.vertical: ScrollBar {}
 
           Column {
-            width: parent.width
-            spacing: Style.spacing.labelGap
-            visible: root.phase === "error"
+            id: content
+            width: flick.width
+            spacing: Style.spacing.rowGap
 
             Text {
               width: parent.width
+              visible: root.hasResult && !root.switcherEnabled
               textFormat: Text.PlainText
-              text: root.errorInfo ? String(root.errorInfo.message || "Translation failed") : ""
+              text: root.hasResult
+                ? Model.languageName(root.result.detected) + "  →  " + Model.languageName(root.result.target)
+                  + "  ·  " + root.result.provider
+                : ""
+              color: root.muted
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+            }
+
+            InputBox {
+              id: inputBox
+              width: parent.width
+              visible: root.inputMode
+              onSubmitted: function(text) { root.translate(text) }
+            }
+
+            Text {
+              width: parent.width
+              visible: root.sourceText !== "" && !root.inputMode
+              textFormat: Text.PlainText
+              text: root.sourceText
               wrapMode: Text.Wrap
-              color: Commons.Color.urgent
+              color: root.muted
               font.family: Style.font.family
               font.pixelSize: Style.font.body
             }
 
             Text {
               width: parent.width
+              visible: root.phase === "loading"
               textFormat: Text.PlainText
-              text: root.errorInfo ? Model.errorHint(root.errorInfo.error) : ""
-              wrapMode: Text.Wrap
-              color: root.muted
+              text: "Translating…"
+              color: root.accent
               font.family: Style.font.family
-              font.pixelSize: Style.font.bodySmall
+              font.pixelSize: Style.font.title
             }
-          }
 
-          Repeater {
-            model: root.senses
+            Item {
+              width: parent.width
+              height: Math.max(translationText.implicitHeight, copyButton.implicitHeight)
+              visible: root.hasResult
 
-            delegate: Column {
-              required property var modelData
-              width: content.width
-              spacing: Style.space(2)
+              Text {
+                id: translationText
+                anchors.left: parent.left
+                anchors.right: copyButton.left
+                anchors.rightMargin: Style.spacing.rowGap
+                textFormat: Text.PlainText
+                text: root.hasResult ? root.result.translation : ""
+                wrapMode: Text.Wrap
+                color: root.foreground
+                font.family: Style.font.family
+                font.pixelSize: Style.font.heading
+                font.bold: true
+              }
+
+              Button {
+                id: copyButton
+                anchors.right: parent.right
+                anchors.top: parent.top
+                iconText: root.copied ? Model.glyph(0xF012C) : Model.glyph(0xF018F)
+                tooltipText: root.copied ? "Copied" : "Copy translation (Super+C)"
+                onClicked: root.copyTranslation()
+              }
+            }
+
+            Column {
+              width: parent.width
+              spacing: Style.spacing.labelGap
+              visible: root.phase === "error"
 
               Text {
                 width: parent.width
                 textFormat: Text.PlainText
-                text: Model.posLabel(modelData.pos)
-                color: root.accent
+                text: root.errorInfo ? String(root.errorInfo.message || "Translation failed") : ""
+                wrapMode: Text.Wrap
+                color: Commons.Color.urgent
                 font.family: Style.font.family
-                font.pixelSize: Style.font.bodySmall
-                font.bold: true
+                font.pixelSize: Style.font.body
               }
 
               Text {
                 width: parent.width
                 textFormat: Text.PlainText
-                text: Model.variantsLine(modelData.variants, root.ui.max_variants)
+                text: root.errorInfo ? Model.errorHint(root.errorInfo.error) : ""
                 wrapMode: Text.Wrap
-                color: root.foreground
+                color: root.muted
                 font.family: Style.font.family
-                font.pixelSize: Style.font.body
+                font.pixelSize: Style.font.bodySmall
+              }
+            }
+
+            Repeater {
+              model: root.senses
+
+              delegate: Column {
+                required property var modelData
+                width: content.width
+                spacing: Style.space(2)
+
+                Text {
+                  width: parent.width
+                  textFormat: Text.PlainText
+                  text: Model.posLabel(modelData.pos)
+                  color: root.accent
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.bodySmall
+                  font.bold: true
+                }
+
+                Text {
+                  width: parent.width
+                  textFormat: Text.PlainText
+                  text: Model.variantsLine(modelData.variants, root.ui.max_variants)
+                  wrapMode: Text.Wrap
+                  color: root.foreground
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.body
+                }
               }
             }
           }
