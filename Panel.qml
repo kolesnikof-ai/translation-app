@@ -56,6 +56,10 @@ Item {
   readonly property bool hasResult: phase === "result" && result !== null
   readonly property var senses: hasResult && Array.isArray(result.senses) ? result.senses : []
 
+  function remember(payloadJson) {
+    if (root.service) root.service.lastPayload = payloadJson
+  }
+
   function applyPayload(p) {
     root.phase = p.state || "loading"
     root.result = p.result || null
@@ -77,13 +81,11 @@ Item {
     inputBox.text = ""
     root.applyPayload(p)
     root.opened = true
-    if (root.service) root.service.panelOpen = true
     Qt.callLater(root.focusKeys)
   }
 
   function close() {
     root.opened = false
-    if (root.service) root.service.panelOpen = false
   }
 
   function focusKeys() {
@@ -96,6 +98,7 @@ Item {
     var p = Model.parseJson(payloadJson)
     if (!p || !root.opened || p.request_id !== root.requestId) return
     root.applyPayload(p)
+    root.remember(payloadJson)
   }
 
   // Runs `omarchy-translate --stdin` for TEXT with the languages picked in the
@@ -123,6 +126,7 @@ Item {
     root.result = parsed.result || null
     root.errorInfo = parsed.error || null
     root.phase = parsed.state
+    root.remember(JSON.stringify(parsed))
   }
 
   function retranslate() {
@@ -170,8 +174,6 @@ Item {
     onTriggered: root.copied = false
   }
 
-  Component.onDestruction: if (root.service) root.service.panelOpen = false
-
   Component {
     id: commandComponent
 
@@ -201,16 +203,32 @@ Item {
     }
   }
 
-  Connections {
-    target: root.service
-    ignoreUnknownSignals: true
-    function onResultReady(payloadJson) { root.onDelivered(payloadJson) }
+  // The omarchy-translate command pushes finished results here. "closed"
+  // tells it the user dismissed the panel while the request was running.
+  ShellIpc {
+    target: "translate"
+
+    function show(payloadJson: string): string {
+      if (!root.opened) return "closed"
+      root.onDelivered(payloadJson)
+      return "ok"
+    }
+
+    function state(): string {
+      return root.opened ? "open" : "closed"
+    }
+
+    function ping(): string {
+      return "ok"
+    }
   }
 
   OverlayWindow {
     id: window
     shown: root.opened
     WlrLayershell.namespace: "omarchy-translate"
+
+    onContentRevealedChanged: if (contentRevealed) root.focusKeys()
 
     readonly property var geometry: Model.cardGeometry({
       position: String(root.ui.position || "cursor"),

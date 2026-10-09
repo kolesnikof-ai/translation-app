@@ -91,11 +91,19 @@ MANIFEST="$REPO_ROOT/manifest.json"
   [ "$status" -ne 0 ]
 }
 
-@test "Panel.qml implements the panel lifecycle and Service.qml registers the IPC target" {
+@test "Panel.qml implements the panel lifecycle and both files register distinct IPC targets" {
   grep -q 'function open(payloadJson)' "$REPO_ROOT/Panel.qml"
   grep -q 'function close()' "$REPO_ROOT/Panel.qml"
-  grep -q 'target: "translate"' "$REPO_ROOT/Service.qml"
-  grep -q 'ShellIpc' "$REPO_ROOT/Service.qml"
+  grep -q 'property bool opened' "$REPO_ROOT/Panel.qml"
+  grep -q 'target: "translate"' "$REPO_ROOT/Panel.qml"
+  grep -q 'target: "translate-service"' "$REPO_ROOT/Service.qml"
+}
+
+@test "the IPC target used by the command exists in the panel" {
+  local target
+  target=$(grep -oE 'omarchy-shell translate show' "$REPO_ROOT/lib/ui.sh" | head -n 1)
+  [ -n "$target" ]
+  grep -q 'function show(payloadJson: string): string' "$REPO_ROOT/Panel.qml"
 }
 
 @test "panel logic helpers behave (node)" {
