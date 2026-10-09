@@ -1,0 +1,12 @@
+#!/bin/bash
+# Mock hyprctl serving canned JSON from $MOCK_DIR.
+case "$1 ${2:-}" in
+  "cursorpos -j") cat "$MOCK_DIR/cursorpos.json" 2>/dev/null || echo '{"x": 100, "y": 200}' ;;
+  "monitors -j") cat "$MOCK_DIR/monitors.json" 2>/dev/null || echo '[{"name":"DP-1","x":0,"y":0,"width":1920,"height":1080,"scale":1.0,"transform":0,"focused":true}]' ;;
+  "activewindow -j") cat "$MOCK_DIR/activewindow.json" 2>/dev/null || echo '{"tags": []}' ;;
+  "dispatch sendshortcut")
+    echo "sendshortcut $3" >>"$MOCK_DIR/hyprctl.log"
+    if [[ -f $MOCK_DIR/copy-result ]]; then cp "$MOCK_DIR/copy-result" "$MOCK_DIR/clipboard"; fi
+    ;;
+  *) echo "mock hyprctl: unsupported: $*" >&2; exit 1 ;;
+esac

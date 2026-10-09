@@ -1,0 +1,20 @@
+#!/bin/bash
+# Mock curl. Responses are queued by the tests (see test_helper.bash) as
+# $MOCK_CURL_DIR/reply.N.{status,body,exit}; every call is logged as
+# call.N.args (one argument per line) and call.N.body (stdin).
+dir=${MOCK_CURL_DIR:?MOCK_CURL_DIR is not set}
+n=$(($(cat "$dir/calls" 2>/dev/null || echo 0) + 1))
+echo "$n" >"$dir/calls"
+printf '%s\n' "$@" >"$dir/call.$n.args"
+cat >"$dir/call.$n.body"
+
+if [[ -f $dir/reply.$n.exit ]]; then
+  echo "curl: (6) Could not resolve host" >&2
+  exit "$(cat "$dir/reply.$n.exit")"
+fi
+if [[ ! -f $dir/reply.$n.status ]]; then
+  echo "mock curl: no reply queued for call $n" >&2
+  exit 99
+fi
+cat "$dir/reply.$n.body"
+printf '\n%s' "$(cat "$dir/reply.$n.status")"
