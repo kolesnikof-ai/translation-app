@@ -1,25 +1,61 @@
 import QtQuick
+import QtQuick.Controls
 import Quickshell
 import Quickshell.Wayland
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "PanelModel.js" as Model
 
+// Floating translation card. The shell calls open(payloadJson) on summon and
+// close() on hide; the omarchy-translate command drives everything else.
 Item {
   id: root
 
+  // Injected by the shell.
   property string omarchyPath: ""
   property var shell: null
   property var manifest: null
   property var service: null
 
   property bool opened: false
-  property string payload: ""
+  // "input" (empty field), "loading", "result" or "error".
+  property string phase: "loading"
+  property string requestId: ""
+  property string sourceText: ""
+  property var result: null
+  property var errorInfo: null
+
+  // Settings forwarded by the command with every summon.
+  property var ui: ({})
+  property var cursorPos: null
+
+  readonly property color foreground: Commons.Color.popups.text
+  readonly property color accent: Commons.Color.accent
+  readonly property color muted: Util.alpha(foreground, 0.62)
+  readonly property int pad: Style.spacing.panelPadding
+  readonly property int gap: Style.gapsOut
+
+  readonly property bool hasResult: phase === "result" && result !== null
+  readonly property var senses: hasResult && Array.isArray(result.senses) ? result.senses : []
+
+  function applyPayload(p) {
+    root.phase = p.state || "loading"
+    root.result = p.result || null
+    root.errorInfo = p.error || null
+    root.sourceText = p.source_text || root.sourceText
+  }
 
   function open(payloadJson) {
-    root.payload = payloadJson || "{}"
+    var p = Model.parseJson(payloadJson) || {}
+    root.ui = p.ui || {}
+    root.cursorPos = p.cursor || null
+    root.requestId = p.request_id || ""
+    root.sourceText = p.source_text || ""
+    root.applyPayload(p)
     root.opened = true
     if (root.service) root.service.panelOpen = true
+    Qt.callLater(root.focusKeys)
   }
 
   function close() {
@@ -27,9 +63,45 @@ Item {
     if (root.service) root.service.panelOpen = false
   }
 
+  function focusKeys() {
+    if (root.opened) keys.forceActiveFocus()
+  }
+
+  function onDelivered(payloadJson) {
+    var p = Model.parseJson(payloadJson)
+    if (!p || !root.opened || p.request_id !== root.requestId) return
+    root.applyPayload(p)
+  }
+
+  function scrollBy(delta) {
+    var max = Math.max(0, flick.contentHeight - flick.height)
+    flick.contentY = Util.clamp(flick.contentY + delta, 0, max)
+  }
+
+  Component.onDestruction: if (root.service) root.service.panelOpen = false
+
+  Connections {
+    target: root.service
+    ignoreUnknownSignals: true
+    function onResultReady(payloadJson) { root.onDelivered(payloadJson) }
+  }
+
   OverlayWindow {
+    id: window
     shown: root.opened
     WlrLayershell.namespace: "omarchy-translate"
+
+    readonly property var geometry: Model.cardGeometry({
+      position: String(root.ui.position || "cursor"),
+      cursor: root.cursorPos,
+      screenW: window.width,
+      screenH: window.height,
+      width: Style.space(Number(root.ui.width) || 480),
+      height: Style.space(Number(root.ui.height) || 360),
+      gap: root.gap,
+      barPosition: root.shell && root.shell.barConfig ? String(root.shell.barConfig.position || "top") : "top",
+      barSize: Style.bar.sizeHorizontal
+    })
 
     MouseArea {
       anchors.fill: parent
@@ -37,22 +109,167 @@ Item {
     }
 
     BorderSurface {
-      width: Style.space(480)
-      height: Style.space(120)
-      anchors.centerIn: parent
+      id: card
+      x: window.geometry.x
+      y: window.geometry.y
+      width: window.geometry.width
+      height: window.geometry.height
       color: Commons.Color.popups.background
       borderSpec: Border.surfaceSpec("popups", "border", Commons.Color.popups.border, Math.max(1, Style.space(2)))
       radius: Style.cornerRadius
+      padding: root.pad
 
-      MouseArea { anchors.fill: parent }
+      MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.AllButtons
+      }
 
-      Text {
-        anchors.centerIn: parent
-        textFormat: Text.PlainText
-        text: root.payload
-        color: Commons.Color.popups.text
-        font.family: Style.font.family
-        font.pixelSize: Style.font.body
+      Item {
+        id: keys
+        anchors.fill: parent
+        focus: true
+        Keys.priority: Keys.BeforeItem
+        Keys.onPressed: function(event) {
+          if (event.key === Qt.Key_Escape) {
+            root.close()
+            event.accepted = true
+          } else if (event.key === Qt.Key_PageDown) {
+            root.scrollBy(flick.height * 0.9)
+            event.accepted = true
+          } else if (event.key === Qt.Key_PageUp) {
+            root.scrollBy(-flick.height * 0.9)
+            event.accepted = true
+          } else if (event.key === Qt.Key_Down) {
+            root.scrollBy(Style.space(40))
+            event.accepted = true
+          } else if (event.key === Qt.Key_Up) {
+            root.scrollBy(-Style.space(40))
+            event.accepted = true
+          }
+        }
+      }
+
+      Flickable {
+        id: flick
+        anchors.fill: parent
+        anchors.topMargin: card.contentTopInset
+        anchors.rightMargin: card.contentRightInset
+        anchors.bottomMargin: card.contentBottomInset
+        anchors.leftMargin: card.contentLeftInset
+        contentWidth: width
+        contentHeight: content.implicitHeight
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ScrollBar {}
+
+        Column {
+          id: content
+          width: flick.width
+          spacing: Style.spacing.rowGap
+
+          Text {
+            width: parent.width
+            visible: root.hasResult
+            textFormat: Text.PlainText
+            text: root.hasResult
+              ? Model.languageName(root.result.detected) + "  →  " + Model.languageName(root.result.target)
+                + "  ·  " + root.result.provider
+              : ""
+            color: root.muted
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
+
+          Text {
+            width: parent.width
+            visible: root.sourceText !== ""
+            textFormat: Text.PlainText
+            text: root.sourceText
+            wrapMode: Text.Wrap
+            color: root.muted
+            font.family: Style.font.family
+            font.pixelSize: Style.font.body
+          }
+
+          Text {
+            width: parent.width
+            visible: root.phase === "loading"
+            textFormat: Text.PlainText
+            text: "Translating…"
+            color: root.accent
+            font.family: Style.font.family
+            font.pixelSize: Style.font.title
+          }
+
+          Text {
+            width: parent.width
+            visible: root.hasResult
+            textFormat: Text.PlainText
+            text: root.hasResult ? root.result.translation : ""
+            wrapMode: Text.Wrap
+            color: root.foreground
+            font.family: Style.font.family
+            font.pixelSize: Style.font.heading
+            font.bold: true
+          }
+
+          Column {
+            width: parent.width
+            spacing: Style.spacing.labelGap
+            visible: root.phase === "error"
+
+            Text {
+              width: parent.width
+              textFormat: Text.PlainText
+              text: root.errorInfo ? String(root.errorInfo.message || "Translation failed") : ""
+              wrapMode: Text.Wrap
+              color: Commons.Color.urgent
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+            }
+
+            Text {
+              width: parent.width
+              textFormat: Text.PlainText
+              text: root.errorInfo ? Model.errorHint(root.errorInfo.error) : ""
+              wrapMode: Text.Wrap
+              color: root.muted
+              font.family: Style.font.family
+              font.pixelSize: Style.font.bodySmall
+            }
+          }
+
+          Repeater {
+            model: root.senses
+
+            delegate: Column {
+              required property var modelData
+              width: content.width
+              spacing: Style.space(2)
+
+              Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                text: Model.posLabel(modelData.pos)
+                color: root.accent
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+              }
+
+              Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                text: Model.variantsLine(modelData.variants, root.ui.max_variants)
+                wrapMode: Text.Wrap
+                color: root.foreground
+                font.family: Style.font.family
+                font.pixelSize: Style.font.body
+              }
+            }
+          }
+        }
       }
     }
   }
