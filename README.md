@@ -1,11 +1,11 @@
-# translation-app
+# Translation (Omarchy plugin)
 
 Translation plugin for Omarchy 4 (plugin id `translate.lookup`). Press a hotkey to translate the selected text, or type text into a small panel. Each request goes to exactly one provider: DeepL (default), Microsoft, Google, Yandex or LibreTranslate.
 
 ## Install
 
 ```bash
-omarchy plugin add <git-url-of-this-repo> --enable
+omarchy plugin add https://github.com/kolesnikof-ai/omarchy-translation-plugin.git --enable
 ~/.config/omarchy/plugins/translate.lookup/install.sh
 ```
 
