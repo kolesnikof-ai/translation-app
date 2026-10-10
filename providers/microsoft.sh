@@ -4,24 +4,15 @@
 
 PROVIDER_CAPS="translate lookup"
 
-MICROSOFT_ENDPOINT="${OMARCHY_TRANSLATE_MICROSOFT_ENDPOINT:-https://api.cognitive.microsofttranslator.com}"
+# The host is fixed on purpose: the subscription key is sent to it, so the
+# environment must not be able to redirect it.
+MICROSOFT_ENDPOINT="https://api.cognitive.microsofttranslator.com"
 
 microsoft::code() {
   case $1 in
     zh) printf 'zh-Hans' ;;
     *) printf '%s' "$1" ;;
   esac
-}
-
-# microsoft::headers -> prints one curl header argument per line.
-microsoft::headers() {
-  local key region
-  key=$(config::get '.keys.microsoft // ""')
-  region=$(config::get '.keys.microsoft_region // ""')
-  printf '%s\n' "-H" "Ocp-Apim-Subscription-Key: $key"
-  if [[ -n $region ]]; then
-    printf '%s\n' "-H" "Ocp-Apim-Subscription-Region: $region"
-  fi
 }
 
 # microsoft::fail -> error object for the last response. A 403 with an
@@ -36,14 +27,19 @@ microsoft::fail() {
   fi
 }
 
+# microsoft::call URL BODY -> posts BODY with the subscription headers. Each
+# header stays one array element, so a stray line break in a configured key is
+# rejected by http::post_json instead of splitting into two headers.
 microsoft::call() {
-  local url=$1 body=$2 header
-  local -a args=()
-  while IFS= read -r header; do
-    args+=("$header")
-  done < <(microsoft::headers)
+  local url=$1 body=$2 key region
+  local -a headers=()
 
-  if ! http::post_json "$url" "$body" "${args[@]}"; then
+  key=$(config::get '.keys.microsoft // ""')
+  region=$(config::get '.keys.microsoft_region // ""')
+  headers+=("Ocp-Apim-Subscription-Key: $key")
+  [[ -z $region ]] || headers+=("Ocp-Apim-Subscription-Region: $region")
+
+  if ! http::post_json "$url" "$body" "${headers[@]}"; then
     http::transport_fail "Microsoft Translator"
     return 1
   fi

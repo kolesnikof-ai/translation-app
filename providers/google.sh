@@ -4,7 +4,9 @@
 
 PROVIDER_CAPS="translate"
 
-GOOGLE_ENDPOINT="${OMARCHY_TRANSLATE_GOOGLE_ENDPOINT:-https://translation.googleapis.com/language/translate/v2}"
+# The host is fixed on purpose: the API key is sent to it, so the environment
+# must not be able to redirect it.
+GOOGLE_ENDPOINT="https://translation.googleapis.com/language/translate/v2"
 
 # google::fail -> error object for the last response. Google reports quota
 # problems as 403 or 429 with a reason, and bad keys as 400 or 403.
@@ -44,7 +46,7 @@ provider_translate() {
     {q: $text, target: $target, format: "text"}
     + (if $source == "" then {} else {source: $source} end)')
 
-  if ! http::post_json "$GOOGLE_ENDPOINT" "$body" -H "X-goog-api-key: $key"; then
+  if ! http::post_json "$GOOGLE_ENDPOINT" "$body" "X-goog-api-key: $key"; then
     http::transport_fail "Google Translate"
     return 1
   fi

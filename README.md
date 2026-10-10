@@ -24,7 +24,7 @@ o.bind("SUPER + SHIFT + T", "Translate selection", "omarchy-translate")
 
 ## Configuration
 
-See `config/config.example.json`. Language codes are lowercase ISO 639-1 (`ru`, `en`, `de`). Words get part-of-speech variants only with the `microsoft` provider (`ui.max_variants` per part of speech). Set `ui.show_language_switcher` to `true` for source/target dropdowns inside the panel.
+See `config/config.example.json`. Language codes are lowercase ISO 639-1 (`ru`, `en`, `de`). Words get part-of-speech variants only with the `microsoft` provider (`ui.max_variants` per part of speech). Set `ui.show_language_switcher` to `true` for source/target dropdowns inside the panel. `libretranslate_url` must be an `https://` URL without credentials; plain `http://` is accepted only for `localhost`, `127.0.0.1` and `[::1]`, because the API key is sent to that address.
 
 ## Tests
 

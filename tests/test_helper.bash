@@ -12,7 +12,10 @@ setup_env() {
   export OMARCHY_TRANSLATE_CONFIG="$BATS_TEST_TMPDIR/config.json"
   export OMARCHY_TRANSLATE_CACHE_DIR="$BATS_TEST_TMPDIR/cache"
   export OMARCHY_TRANSLATE_COPY_DELAY=0
-  mkdir -p "$HOME" "$MOCK_CURL_DIR"
+  # Temporary header files must not depend on the host session.
+  export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/runtime"
+  export TMPDIR="$BATS_TEST_TMPDIR/tmp"
+  mkdir -p "$HOME" "$MOCK_CURL_DIR" "$XDG_RUNTIME_DIR" "$TMPDIR"
   export PATH="$REPO_ROOT/tests/mocks:$PATH"
   CURL_REPLIES=0
 }
@@ -42,6 +45,17 @@ curl_calls() {
 # curl_args N -> the arguments of call N, space separated.
 curl_args() {
   tr '\n' ' ' <"$MOCK_CURL_DIR/call.$1.args"
+}
+
+# curl_headers N -> the request headers of call N that were passed through a
+# private header file (the API key lives there, never in argv).
+curl_headers() {
+  cat "$MOCK_CURL_DIR/call.$1.headers"
+}
+
+# curl_headers_mode N -> the file mode of that header file while curl ran.
+curl_headers_mode() {
+  cat "$MOCK_CURL_DIR/call.$1.headers.mode"
 }
 
 curl_url() {

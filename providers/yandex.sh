@@ -4,7 +4,9 @@
 
 PROVIDER_CAPS="translate"
 
-YANDEX_ENDPOINT="${OMARCHY_TRANSLATE_YANDEX_ENDPOINT:-https://translate.api.cloud.yandex.net/translate/v2/translate}"
+# The host is fixed on purpose: the API key is sent to it, so the environment
+# must not be able to redirect it.
+YANDEX_ENDPOINT="https://translate.api.cloud.yandex.net/translate/v2/translate"
 
 provider_translate() {
   local text=$1 src=$2 dst=$3 key body
@@ -19,7 +21,7 @@ provider_translate() {
     {targetLanguageCode: $target, texts: [$text], format: "PLAIN_TEXT"}
     + (if $source == "" then {} else {sourceLanguageCode: $source} end)')
 
-  if ! http::post_json "$YANDEX_ENDPOINT" "$body" -H "Authorization: Api-Key $key"; then
+  if ! http::post_json "$YANDEX_ENDPOINT" "$body" "Authorization: Api-Key $key"; then
     http::transport_fail "Yandex Translate"
     return 1
   fi

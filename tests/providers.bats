@@ -12,7 +12,8 @@ setup() {
   translate_stdin "hello"
   [ "$status" -eq 0 ]
   [ "$(curl_url 1)" = "https://translation.googleapis.com/language/translate/v2" ]
-  [[ "$(curl_args 1)" == *"X-goog-api-key: gkey"* ]]
+  [[ "$(curl_headers 1)" == *"X-goog-api-key: gkey"* ]]
+  [[ "$(curl_args 1)" != *gkey* ]]
   [ "$(jq_field "$(curl_body 1)" .q)" = hello ]
   [ "$(jq_field "$(curl_body 1)" .target)" = ru ]
   [ "$(jq_field "$(curl_body 1)" .format)" = text ]
@@ -52,7 +53,8 @@ setup() {
   translate_stdin "hello"
   [ "$status" -eq 0 ]
   [ "$(curl_url 1)" = "https://translate.api.cloud.yandex.net/translate/v2/translate" ]
-  [[ "$(curl_args 1)" == *"Authorization: Api-Key ykey"* ]]
+  [[ "$(curl_headers 1)" == *"Authorization: Api-Key ykey"* ]]
+  [[ "$(curl_args 1)" != *ykey* ]]
   [ "$(jq_field "$(curl_body 1)" .targetLanguageCode)" = ru ]
   [ "$(jq_field "$(curl_body 1)" '.texts[0]')" = hello ]
   [ "$(jq_field "$(curl_body 1)" 'has("folderId")')" = false ]
@@ -101,6 +103,40 @@ setup() {
   [ "$(jq_field "$output" .error)" = no_key ]
 }
 
+@test "libretranslate accepts https anywhere and plain http only for this machine" {
+  local url
+  for url in "https://lt.example.com" "https://lt.example.com:5000/api" "http://localhost" \
+    "http://localhost:5000" "http://127.0.0.1:5000" "http://[::1]:5000"; do
+    write_config "{\"provider\":\"libretranslate\",\"libretranslate_url\":\"$url\"}"
+    rm -rf "$OMARCHY_TRANSLATE_CACHE_DIR"
+    curl_reply 200 '{"translatedText":"привет"}'
+    translate_stdin "hello"
+    [ "$status" -eq 0 ] || { echo "rejected: $url"; return 1; }
+  done
+}
+
+@test "libretranslate refuses URLs the key must not be sent to" {
+  local url
+  for url in "http://10.0.0.1:5000" "http://lt.example.com" "http://localhost.evil.example" \
+    "http://127.0.0.1.evil.example" "http://localhost:5000@evil.example" \
+    "https://user:pass@lt.example.com" "https://user@lt.example.com" \
+    "ftp://lt.example.com" "lt.example.com" "https://" "https://lt.example.com/a b" \
+    $'https://lt.example.com\nX-Injected: 1'; do
+    write_config "$(jq -cn --arg url "$url" '{provider: "libretranslate", libretranslate_url: $url, keys: {libretranslate: "ltkey"}}')"
+    translate_stdin "hello"
+    [ "$status" -eq 1 ] || { echo "accepted: $url"; return 1; }
+    [ "$(jq_field "$output" .error)" = config ] || { echo "wrong error for: $url"; return 1; }
+  done
+  [ "$(curl_calls)" -eq 0 ]
+}
+
+@test "the libretranslate config error does not echo the URL back" {
+  write_config '{"provider":"libretranslate","libretranslate_url":"https://user:secretpass@lt.example.com"}'
+  translate_stdin "hello"
+  [ "$(jq_field "$output" .error)" = config ]
+  [[ "$output" != *secretpass* ]]
+}
+
 @test "libretranslate error mapping" {
   write_config '{"provider":"libretranslate","libretranslate_url":"http://localhost:5000"}'
   curl_reply 400 '{"error":"Invalid API key"}'
@@ -117,7 +153,7 @@ setup() {
 @test "providers without the lookup capability never look words up" {
   local provider
   for provider in google yandex libretranslate deepl; do
-    write_config "{\"provider\":\"$provider\",\"libretranslate_url\":\"http://lt\",\"keys\":{\"google\":\"k\",\"yandex\":\"k\",\"deepl\":\"k\"}}"
+    write_config "{\"provider\":\"$provider\",\"libretranslate_url\":\"https://lt.example.com\",\"keys\":{\"google\":\"k\",\"yandex\":\"k\",\"deepl\":\"k\"}}"
     rm -rf "$OMARCHY_TRANSLATE_CACHE_DIR"
     case $provider in
       google) curl_reply 200 '{"data":{"translations":[{"translatedText":"привет","detectedSourceLanguage":"en"}]}}' ;;
@@ -132,6 +168,29 @@ setup() {
     [ "$(jq_field "$output" '.senses | length')" -eq 0 ]
     [ "$(( $(curl_calls) - before ))" -eq 1 ]
   done
+}
+
+@test "provider hosts cannot be redirected through the environment" {
+  export OMARCHY_TRANSLATE_GOOGLE_ENDPOINT=https://evil.example/google
+  export OMARCHY_TRANSLATE_MICROSOFT_ENDPOINT=https://evil.example/microsoft
+  export OMARCHY_TRANSLATE_YANDEX_ENDPOINT=https://evil.example/yandex
+  export GOOGLE_ENDPOINT=https://evil.example/google MICROSOFT_ENDPOINT=https://evil.example/microsoft
+  export YANDEX_ENDPOINT=https://evil.example/yandex
+
+  write_config '{"provider":"google","keys":{"google":"k"}}'
+  curl_reply 200 '{"data":{"translations":[{"translatedText":"привет","detectedSourceLanguage":"en"}]}}'
+  translate_stdin "hello"
+  [ "$(curl_url 1)" = "https://translation.googleapis.com/language/translate/v2" ]
+
+  write_config '{"provider":"yandex","keys":{"yandex":"k"}}'
+  curl_reply 200 '{"translations":[{"text":"привет","detectedLanguageCode":"en"}]}'
+  translate_stdin "hello"
+  [ "$(curl_url 2)" = "https://translate.api.cloud.yandex.net/translate/v2/translate" ]
+
+  write_config '{"provider":"microsoft","keys":{"microsoft":"k"}}'
+  microsoft_translate_reply "привет"
+  translate_stdin "hello world"
+  [[ "$(curl_url 3)" == "https://api.cognitive.microsofttranslator.com/translate?"* ]]
 }
 
 @test "each request uses exactly the configured provider" {

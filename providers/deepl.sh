@@ -55,7 +55,7 @@ provider_translate() {
     + (if $formality == "" then {} else {formality: $formality} end)')
 
   if ! http::post_json "$(deepl::endpoint "$key")/v2/translate" "$body" \
-    -H "Authorization: DeepL-Auth-Key $key"; then
+    "Authorization: DeepL-Auth-Key $key"; then
     http::transport_fail "DeepL"
     return 1
   fi

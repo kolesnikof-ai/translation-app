@@ -30,6 +30,39 @@ entry_count() {
   [[ $file =~ ^[0-9a-f]{64}\.json$ ]]
 }
 
+@test "cache entries and last.json are readable by the owner only" {
+  deepl_reply "привет"
+  translate_stdin "hello"
+  [ "$(stat -c %a "$OMARCHY_TRANSLATE_CACHE_DIR/last.json")" = 600 ]
+  local file
+  file=$(find "$OMARCHY_TRANSLATE_CACHE_DIR" -maxdepth 1 -name '*.json' ! -name last.json | head -n 1)
+  [ -n "$file" ]
+  [ "$(stat -c %a "$file")" = 600 ]
+}
+
+@test "the cache is private even under a permissive umask and with missing parent directories" {
+  umask 000
+  export OMARCHY_TRANSLATE_CACHE_DIR="$BATS_TEST_TMPDIR/fresh/parent/cache"
+  deepl_reply "привет"
+  translate_stdin "hello"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$OMARCHY_TRANSLATE_CACHE_DIR")" = 700 ]
+  [ "$(stat -c %a "$BATS_TEST_TMPDIR/fresh/parent")" = 700 ]
+  [ "$(stat -c %a "$OMARCHY_TRANSLATE_CACHE_DIR/last.json")" = 600 ]
+}
+
+@test "a cache left behind with wide permissions is tightened on the next write" {
+  mkdir -p "$OMARCHY_TRANSLATE_CACHE_DIR"
+  chmod 755 "$OMARCHY_TRANSLATE_CACHE_DIR"
+  printf '{"translation":"old"}\n' >"$OMARCHY_TRANSLATE_CACHE_DIR/last.json"
+  chmod 644 "$OMARCHY_TRANSLATE_CACHE_DIR/last.json"
+  deepl_reply "привет"
+  translate_stdin "hello"
+  [ "$(stat -c %a "$OMARCHY_TRANSLATE_CACHE_DIR")" = 700 ]
+  [ "$(stat -c %a "$OMARCHY_TRANSLATE_CACHE_DIR/last.json")" = 600 ]
+  [ "$(jq -r .translation "$OMARCHY_TRANSLATE_CACHE_DIR/last.json")" = "привет" ]
+}
+
 @test "different text, language pair or provider miss the cache" {
   deepl_reply "привет"
   translate_stdin "hello"
@@ -50,6 +83,24 @@ entry_count() {
   translate_stdin "hello"
   write_config '{"keys":{"deepl":"k"},"deepl_formality":"more"}'
   deepl_reply "здравствуйте"
+  translate_stdin "hello"
+  [ "$(curl_calls)" -eq 2 ]
+  [ "$(jq_field "$output" .translation)" = "здравствуйте" ]
+}
+
+@test "changing the libretranslate instance misses the cache" {
+  write_config '{"provider":"libretranslate","libretranslate_url":"https://one.example.com/"}'
+  curl_reply 200 '{"translatedText":"привет"}'
+  translate_stdin "hello"
+  [ "$(curl_calls)" -eq 1 ]
+
+  # A trailing slash is the same instance.
+  write_config '{"provider":"libretranslate","libretranslate_url":"https://one.example.com"}'
+  translate_stdin "hello"
+  [ "$(curl_calls)" -eq 1 ]
+
+  write_config '{"provider":"libretranslate","libretranslate_url":"https://two.example.com"}'
+  curl_reply 200 '{"translatedText":"здравствуйте"}'
   translate_stdin "hello"
   [ "$(curl_calls)" -eq 2 ]
   [ "$(jq_field "$output" .translation)" = "здравствуйте" ]

@@ -17,6 +17,35 @@ libretranslate::fail() {
   fi
 }
 
+# libretranslate::valid_url URL -> succeeds for a URL that is safe to send the
+# API key to: https anywhere, or plain http only for this machine (localhost,
+# 127.0.0.1, ::1). Whitespace and embedded credentials (user:pass@) are refused.
+libretranslate::valid_url() {
+  local url=$1 rest authority host
+
+  [[ $url != *[[:space:]]* ]] || return 1
+  case $url in
+    https://*) rest=${url#https://} ;;
+    http://*) rest=${url#http://} ;;
+    *) return 1 ;;
+  esac
+
+  authority=${rest%%[/?#]*}
+  [[ -n $authority && $authority != *@* ]] || return 1
+
+  if [[ $url == http://* ]]; then
+    if [[ $authority == \[*\]* ]]; then
+      host=${authority%%]*}]
+    else
+      host=${authority%%:*}
+    fi
+    case $host in
+      localhost | 127.0.0.1 | '[::1]') ;;
+      *) return 1 ;;
+    esac
+  fi
+}
+
 provider_translate() {
   local text=$1 src=$2 dst=$3 url key body
 
@@ -24,6 +53,11 @@ provider_translate() {
   url=${url%/}
   if [[ -z $url ]]; then
     tr::error no_key "LibreTranslate URL is not set (libretranslate_url in the config)"
+    return 1
+  fi
+  if ! libretranslate::valid_url "$url"; then
+    # The URL is left out of the message: it may carry credentials.
+    tr::error config "libretranslate_url must be an https:// URL without credentials (plain http is only allowed for localhost)"
     return 1
   fi
   key=$(config::get '.keys.libretranslate // ""')

@@ -6,3 +6,5 @@ else
   cat >"$MOCK_DIR/clipboard"
 fi
 echo "wl-copy $*" >>"$MOCK_DIR/wl-copy.log"
+# Records whether the panel's copy text leaked into this long-lived process.
+printf '%s' "${OMARCHY_TRANSLATE_CLIP+set}" >"$MOCK_DIR/wl-copy.env"

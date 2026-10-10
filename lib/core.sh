@@ -51,12 +51,17 @@ core::cap_variants() {
 
 # core::cache_key PROVIDER SRC DST EXPLICIT TEXT -> cache key covering every
 # setting that changes the answer: the language pair, whether the fallback
-# target may apply (and which one) and DeepL's formality.
+# target may apply (and which one), DeepL's formality and the LibreTranslate
+# instance (another instance may translate differently).
 core::cache_key() {
-  local provider=$1 src=$2 dst=$3 explicit=$4 text=$5 extra
+  local provider=$1 src=$2 dst=$3 explicit=$4 text=$5 extra instance
   extra="explicit=$explicit"
   [[ $explicit == 1 ]] || extra+=";fallback=$(config::get '.fallback_target // ""')"
   [[ $provider != deepl ]] || extra+=";formality=$(config::get '.deepl_formality // "default"')"
+  if [[ $provider == libretranslate ]]; then
+    instance=$(config::get '.libretranslate_url // ""')
+    extra+=";instance=${instance%/}"
+  fi
   cache::key "$provider" "$src" "$dst" "$extra" "$text"
 }
 

@@ -1,11 +1,21 @@
 #!/bin/bash
 # Mock curl. Responses are queued by the tests (see test_helper.bash) as
 # $MOCK_CURL_DIR/reply.N.{status,body,exit}; every call is logged as
-# call.N.args (one argument per line) and call.N.body (stdin).
+# call.N.args (one argument per line), call.N.body (stdin) and call.N.headers
+# (the contents of every "-H @file" header file, read while the file exists).
 dir=${MOCK_CURL_DIR:?MOCK_CURL_DIR is not set}
 n=$(($(cat "$dir/calls" 2>/dev/null || echo 0) + 1))
 echo "$n" >"$dir/calls"
 printf '%s\n' "$@" >"$dir/call.$n.args"
+: >"$dir/call.$n.headers"
+previous=""
+for arg in "$@"; do
+  if [[ $previous == -H && $arg == @* ]]; then
+    cat "${arg#@}" >>"$dir/call.$n.headers"
+    stat -c '%a' "${arg#@}" >"$dir/call.$n.headers.mode"
+  fi
+  previous=$arg
+done
 cat >"$dir/call.$n.body"
 
 if [[ -f $dir/reply.$n.exit ]]; then

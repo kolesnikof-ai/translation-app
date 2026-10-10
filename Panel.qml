@@ -56,8 +56,34 @@ Item {
   readonly property bool hasResult: phase === "result" && result !== null
   readonly property var senses: hasResult && Array.isArray(result.senses) ? result.senses : []
 
-  function remember(payloadJson) {
-    if (root.service) root.service.lastPayload = payloadJson
+  // The service shows this over IPC for debugging, so it only gets the request
+  // state; the source text and the translation never leave the panel.
+  function remember(state, requestId) {
+    if (root.service) root.service.lastPayload = JSON.stringify({ state: state, request_id: requestId })
+  }
+
+  // Loads a payload file written by the omarchy-translate command. A fresh
+  // view per read always blocks until the file is loaded, so a reused view can
+  // never hand back the previous file.
+  Component {
+    id: payloadFileComponent
+
+    FileView {
+      blockLoading: true
+      printErrors: false
+    }
+  }
+
+  // The command passes the path of a private payload file (command-line
+  // arguments are readable by every local user). When it could not write one
+  // it passes the JSON itself, which is returned unchanged.
+  function readPayload(argument) {
+    var value = String(argument || "")
+    if (!Model.isPayloadPath(value)) return value
+    var file = payloadFileComponent.createObject(root, { path: value })
+    var text = file.text()
+    file.destroy()
+    return text
   }
 
   function applyPayload(p) {
@@ -68,7 +94,7 @@ Item {
   }
 
   function open(payloadJson) {
-    var p = Model.parseJson(payloadJson) || {}
+    var p = Model.parseJson(root.readPayload(payloadJson)) || {}
     root.ui = p.ui || {}
     root.cursorPos = p.cursor || null
     root.baseSource = p.source || "auto"
@@ -95,10 +121,10 @@ Item {
   }
 
   function onDelivered(payloadJson) {
-    var p = Model.parseJson(payloadJson)
+    var p = Model.parseJson(root.readPayload(payloadJson))
     if (!p || !root.opened || p.request_id !== root.requestId) return
     root.applyPayload(p)
-    root.remember(payloadJson)
+    root.remember(p.state, p.request_id)
   }
 
   // Runs `omarchy-translate --stdin` for TEXT with the languages picked in the
@@ -126,7 +152,7 @@ Item {
     root.result = parsed.result || null
     root.errorInfo = parsed.error || null
     root.phase = parsed.state
-    root.remember(JSON.stringify(parsed))
+    root.remember(parsed.state, reqId)
   }
 
   function retranslate() {
@@ -153,12 +179,23 @@ Item {
     root.retranslate()
   }
 
+  // A detached process has no stdin and command-line arguments are readable by
+  // every local user, so the text travels in the process environment (readable
+  // by the owner only). The helper drops the variable before wl-copy starts, so
+  // the long-lived wl-copy process does not keep it either.
+  Process {
+    id: copyProc
+    command: ["bash", "-c", "text=$OMARCHY_TRANSLATE_CLIP; unset OMARCHY_TRANSLATE_CLIP; printf %s \"$text\" | wl-copy"]
+  }
+
   // Super+C is rebound by Omarchy to "universal copy": the compositor sends
   // Ctrl+C (Ctrl+Shift+C over a terminal) to the focused surface, so both land
   // here as an ordinary key press.
   function copyTranslation() {
     if (!root.hasResult || !root.result.translation) return
-    Quickshell.execDetached(["bash", "-c", "printf %s \"$1\" | wl-copy", "omarchy-translate", root.result.translation])
+    copyProc.environment = ({ "OMARCHY_TRANSLATE_CLIP": String(root.result.translation) })
+    copyProc.startDetached()
+    copyProc.environment = ({})
     root.copied = true
     copiedTimer.restart()
   }
@@ -184,7 +221,14 @@ Item {
       property var extraArgs: []
       property bool delivered: false
 
-      command: ["bash", "-c", "printf %s \"$1\" | \"$2\" --stdin \"${@:3}\"", "omarchy-translate", proc.text, root.cliPath].concat(proc.extraArgs)
+      // The text goes in through stdin: command-line arguments are readable by
+      // every local user. Closing stdin after the write gives the command EOF.
+      command: [root.cliPath, "--stdin"].concat(proc.extraArgs)
+      stdinEnabled: true
+      onStarted: {
+        proc.write(proc.text)
+        proc.stdinEnabled = false
+      }
 
       stdout: StdioCollector {
         id: collector

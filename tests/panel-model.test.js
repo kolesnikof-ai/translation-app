@@ -60,6 +60,18 @@ assert.match(r.error.message, /127/)
 r = m.parseCommandOutput("not json at all", 1)
 assert.strictEqual(r.error.message, "not json at all")
 
+// payload files: only the private files the command writes are read
+assert.strictEqual(m.isPayloadPath("/home/u/.cache/omarchy-translate/ipc/payload.aB3xYz"), true)
+assert.strictEqual(m.isPayloadPath("/tmp/t/cache/ipc/payload.Zz9Zz9"), true)
+assert.strictEqual(m.isPayloadPath('{"state":"loading"}'), false, "inline JSON is not a path")
+assert.strictEqual(m.isPayloadPath("/etc/passwd"), false)
+assert.strictEqual(m.isPayloadPath("/home/u/.cache/omarchy-translate/ipc/../../.ssh/id_ed25519"), false)
+assert.strictEqual(m.isPayloadPath("/home/u/.cache/x/ipc/../ipc/payload.abc123"), false)
+assert.strictEqual(m.isPayloadPath("ipc/payload.abc123"), false, "relative paths are refused")
+assert.strictEqual(m.isPayloadPath("/home/u/ipc/payload.abc/../../secret"), false)
+assert.strictEqual(m.isPayloadPath(""), false)
+assert.strictEqual(m.isPayloadPath(undefined), false)
+
 // languages
 assert.strictEqual(m.languageName("ru"), "Russian")
 assert.strictEqual(m.languageName("xx"), "XX")

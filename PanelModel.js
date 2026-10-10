@@ -32,6 +32,14 @@ function languageOptions(includeAuto) {
   return out
 }
 
+// The command hands the panel the path of a private payload file (see
+// lib/ui.sh) instead of the JSON itself, because command-line arguments are
+// readable by every local user. Only paths of that exact shape are read.
+function isPayloadPath(value) {
+  var path = String(value || "")
+  return /^\/.+\/ipc\/payload\.[A-Za-z0-9]+$/.test(path) && path.indexOf("/../") === -1
+}
+
 function parseJson(text) {
   try {
     var value = JSON.parse(String(text || ""))
@@ -120,7 +128,8 @@ function cardGeometry(opts) {
 if (typeof module !== "undefined") {
   module.exports = {
     LANGUAGES: LANGUAGES, languageName: languageName, languageOptions: languageOptions,
-    parseJson: parseJson, parseCommandOutput: parseCommandOutput, errorHint: errorHint,
+    isPayloadPath: isPayloadPath, parseJson: parseJson, parseCommandOutput: parseCommandOutput,
+    errorHint: errorHint,
     glyph: glyph, posLabel: posLabel, variantsLine: variantsLine, cardGeometry: cardGeometry
   }
 }

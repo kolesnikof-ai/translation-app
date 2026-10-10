@@ -99,6 +99,46 @@ MANIFEST="$REPO_ROOT/manifest.json"
   grep -q 'target: "translate-service"' "$REPO_ROOT/Service.qml"
 }
 
+@test "Panel.qml hands text to commands through stdin or the environment, never argv" {
+  run grep -n 'execDetached' "$REPO_ROOT/Panel.qml"
+  [ "$status" -ne 0 ]
+  run grep -nE 'command:.*(proc\.text|result\.translation|sourceText)' "$REPO_ROOT/Panel.qml"
+  [ "$status" -ne 0 ]
+  grep -q 'stdinEnabled: true' "$REPO_ROOT/Panel.qml"
+  grep -q 'proc.write(proc.text)' "$REPO_ROOT/Panel.qml"
+  grep -q 'OMARCHY_TRANSLATE_CLIP' "$REPO_ROOT/Panel.qml"
+}
+
+@test "Panel.qml reads payload files with a blocking FileView" {
+  grep -q 'function readPayload(argument)' "$REPO_ROOT/Panel.qml"
+  grep -q 'blockLoading: true' "$REPO_ROOT/Panel.qml"
+  grep -q 'Model.isPayloadPath' "$REPO_ROOT/Panel.qml"
+}
+
+@test "the panel's copy helper delivers the text intact and keeps it out of wl-copy's environment" {
+  setup_env
+  local snippet text
+  snippet=$(grep -oE 'command: \["bash", "-c", "text=\$OMARCHY_TRANSLATE_CLIP[^]]*"\]' "$REPO_ROOT/Panel.qml" \
+    | sed -E 's/^command: \["bash", "-c", "//; s/"\]$//; s/\\"/"/g')
+  [ -n "$snippet" ]
+  text=$'multi line\n"quoted" $HOME `date` \\ end'
+  OMARCHY_TRANSLATE_CLIP=$text run bash -c "$snippet"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$MOCK_DIR/clipboard")" = "$text" ]
+  [ ! -s "$MOCK_DIR/wl-copy.env" ]
+}
+
+@test "translate-service last exposes only the state and the request id" {
+  run grep -nE 'return root\.lastPayload' "$REPO_ROOT/Service.qml"
+  [ "$status" -ne 0 ]
+  grep -q 'state: p && typeof p.state' "$REPO_ROOT/Service.qml"
+  grep -q 'request_id: p && typeof p.request_id' "$REPO_ROOT/Service.qml"
+  # The panel stores nothing but those two fields either.
+  grep -q 'JSON.stringify({ state: state, request_id: requestId })' "$REPO_ROOT/Panel.qml"
+  run grep -nE 'service\.lastPayload = (payloadJson|JSON\.stringify\(parsed\))' "$REPO_ROOT/Panel.qml"
+  [ "$status" -ne 0 ]
+}
+
 @test "the IPC target used by the command exists in the panel" {
   local target
   target=$(grep -oE 'omarchy-shell translate show' "$REPO_ROOT/lib/ui.sh" | head -n 1)

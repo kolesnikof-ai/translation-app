@@ -11,13 +11,19 @@ summons() {
   grep -c '^shell summon translate.lookup ' "$MOCK_DIR/shell.log" || true
 }
 
+# payload_arg PREFIX N -> the argument of the Nth logged call that starts with
+# PREFIX. The command passes the path of a private payload file, not the JSON.
+payload_arg() {
+  grep -F "$1 " "$MOCK_DIR/shell.log" | sed -n "${2}p" | sed "s|^$1 ||"
+}
+
 # summon_payload N -> JSON payload of the Nth summon call.
 summon_payload() {
-  grep '^shell summon translate.lookup ' "$MOCK_DIR/shell.log" | sed -n "${1}p" | sed 's/^shell summon translate.lookup //'
+  cat "$(payload_arg 'shell summon translate.lookup' "$1")"
 }
 
 show_payload() {
-  grep '^translate show ' "$MOCK_DIR/shell.log" | sed -n "${1}p" | sed 's/^translate show //'
+  cat "$(payload_arg 'translate show' "$1")"
 }
 
 @test "a selection opens the panel in loading state, then delivers the result over IPC" {
@@ -35,6 +41,52 @@ show_payload() {
   [ "$(jq_field "$result" .state)" = result ]
   [ "$(jq_field "$result" .result.translation)" = "привет" ]
   [ "$(jq_field "$result" .request_id)" = "$(jq_field "$loading" .request_id)" ]
+}
+
+@test "the panel payload goes through a private file and never through argv" {
+  printf 'secret sentence' >"$MOCK_DIR/primary"
+  deepl_reply "привет"
+  run "$CLI"
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$MOCK_DIR/shell.log")" != *"secret sentence"* ]]
+  [[ "$(cat "$MOCK_DIR/shell.log")" != *"привет"* ]]
+
+  local summon_file show_file
+  summon_file=$(payload_arg 'shell summon translate.lookup' 1)
+  show_file=$(payload_arg 'translate show' 1)
+  [[ $summon_file == "$OMARCHY_TRANSLATE_CACHE_DIR"/ipc/payload.* ]]
+  [[ $show_file == "$OMARCHY_TRANSLATE_CACHE_DIR"/ipc/payload.* ]]
+  [ "$(stat -c %a "$summon_file")" = 600 ]
+  [ "$(stat -c %a "$show_file")" = 600 ]
+  [ "$(stat -c %a "$OMARCHY_TRANSLATE_CACHE_DIR")" = 700 ]
+  [ "$(stat -c %a "$OMARCHY_TRANSLATE_CACHE_DIR/ipc")" = 700 ]
+  [ "$(jq_field "$(cat "$summon_file")" .source_text)" = "secret sentence" ]
+  [ "$(jq_field "$(cat "$show_file")" .result.translation)" = "привет" ]
+}
+
+@test "old payload files are removed and fresh ones are kept" {
+  local dir="$OMARCHY_TRANSLATE_CACHE_DIR/ipc"
+  mkdir -p "$dir"
+  : >"$dir/payload.stale1"
+  touch -d '10 minutes ago' "$dir/payload.stale1"
+  : >"$dir/payload.fresh1"
+  printf 'hello' >"$MOCK_DIR/primary"
+  deepl_reply "привет"
+  run "$CLI"
+  [ "$status" -eq 0 ]
+  [ ! -e "$dir/payload.stale1" ]
+  [ -e "$dir/payload.fresh1" ]
+}
+
+@test "when no private file can be written the payload is passed inline" {
+  : >"$BATS_TEST_TMPDIR/blocker"
+  export OMARCHY_TRANSLATE_CACHE_DIR="$BATS_TEST_TMPDIR/blocker/cache"
+  printf 'hello' >"$MOCK_DIR/primary"
+  deepl_reply "привет"
+  run "$CLI"
+  [ "$status" -eq 0 ]
+  grep -q '^shell summon translate.lookup {' "$MOCK_DIR/shell.log"
+  grep -q '^translate show {' "$MOCK_DIR/shell.log"
 }
 
 @test "the summon payload carries cursor position and panel settings" {

@@ -20,12 +20,39 @@ setup() {
   [ "$(curl_url 2)" = "https://api.deepl.com/v2/translate" ]
 }
 
-@test "the key goes in the Authorization header and the text stays out of argv" {
+@test "the key goes in the Authorization header file and neither key nor text reach argv" {
   deepl_reply "привет"
   translate_stdin "hello"
-  [[ "$(curl_args 1)" == *"Authorization: DeepL-Auth-Key secret"* ]]
+  [[ "$(curl_headers 1)" == *"Authorization: DeepL-Auth-Key secret"* ]]
+  [ "$(curl_headers_mode 1)" = 600 ]
+  [[ "$(curl_args 1)" != *secret* ]]
+  [[ "$(curl_args 1)" != *Authorization* ]]
   [[ "$(curl_args 1)" != *hello* ]]
   [ "$(jq_field "$(curl_body 1)" '.text[0]')" = hello ]
+}
+
+@test "the temporary header file is removed after the request" {
+  deepl_reply "привет"
+  translate_stdin "hello"
+  [ "$status" -eq 0 ]
+  [ -z "$(find "$XDG_RUNTIME_DIR" "$TMPDIR" -name 'omarchy-translate-headers.*')" ]
+}
+
+@test "the header file falls back to TMPDIR when the runtime dir is unusable" {
+  export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/missing"
+  deepl_reply "привет"
+  translate_stdin "hello"
+  [ "$status" -eq 0 ]
+  [[ "$(curl_headers 1)" == *"DeepL-Auth-Key secret"* ]]
+  [ -z "$(find "$TMPDIR" -name 'omarchy-translate-headers.*')" ]
+}
+
+@test "an API key containing a line break is rejected before curl runs" {
+  write_config '{"keys":{"deepl":"abc\nX-Injected: 1"}}'
+  translate_stdin "hello"
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error)" = network ]
+  [ "$(curl_calls)" -eq 0 ]
 }
 
 @test "language codes are converted to DeepL format" {

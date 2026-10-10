@@ -52,11 +52,40 @@ ui::payload() {
     + (if $body_key == "" then {} else {($body_key): $body} end)'
 }
 
+# ui::stage PAYLOAD -> writes PAYLOAD into a private file and prints its path.
+# omarchy-shell only accepts arguments, and every local user can read those
+# from /proc/<pid>/cmdline, so the panel is handed a path instead of the text.
+ui::stage() {
+  local dir file
+  cache::ensure_dir || return 1
+  dir="$(cache::dir)/ipc"
+  (umask 077 && mkdir -p "$dir") 2>/dev/null && chmod 700 "$dir" 2>/dev/null || return 1
+
+  # A payload is only needed until the panel has read it.
+  find "$dir" -maxdepth 1 -type f -name 'payload.*' -mmin +5 -delete 2>/dev/null
+
+  file=$(mktemp "$dir/payload.XXXXXX" 2>/dev/null) || return 1
+  if ! printf '%s' "$1" >"$file" 2>/dev/null; then
+    rm -f "$file"
+    return 1
+  fi
+  printf '%s' "$file"
+}
+
+# ui::argument PAYLOAD -> the single argument handed to omarchy-shell: the path
+# of a private payload file. When no file can be written the JSON itself is
+# passed instead, so the panel still works (at the cost of the text being
+# visible in the process list).
+ui::argument() {
+  ui::stage "$1" || printf '%s' "$1"
+}
+
 # ui::summon PAYLOAD -> opens (or re-opens) the panel with PAYLOAD.
 # Succeeds when the shell acknowledged the call.
 ui::summon() {
-  local reply
-  reply=$(omarchy-shell shell summon "$TR_PLUGIN_ID" "$1" 2>&1) || {
+  local reply argument
+  argument=$(ui::argument "$1")
+  reply=$(omarchy-shell shell summon "$TR_PLUGIN_ID" "$argument" 2>&1) || {
     tr::notify "omarchy-shell is not running"
     return 1
   }
@@ -70,8 +99,9 @@ ui::summon() {
 # translate IPC target is missing the panel is re-summoned instead; when the
 # user already closed the panel nothing is shown.
 ui::deliver() {
-  local reply
-  if reply=$(omarchy-shell translate show "$1" 2>/dev/null); then
+  local reply argument
+  argument=$(ui::argument "$1")
+  if reply=$(omarchy-shell translate show "$argument" 2>/dev/null); then
     case $reply in
       ok | closed) return 0 ;;
     esac

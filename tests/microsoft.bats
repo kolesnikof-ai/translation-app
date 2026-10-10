@@ -25,8 +25,10 @@ lookup_reply() {
   translate_stdin "hello world"
   [ "$status" -eq 0 ]
   [[ "$(curl_url 1)" == "https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&textType=plain&to=ru" ]]
-  [[ "$(curl_args 1)" == *"Ocp-Apim-Subscription-Key: mskey"* ]]
-  [[ "$(curl_args 1)" == *"Ocp-Apim-Subscription-Region: westeurope"* ]]
+  [[ "$(curl_headers 1)" == *"Ocp-Apim-Subscription-Key: mskey"* ]]
+  [[ "$(curl_headers 1)" == *"Ocp-Apim-Subscription-Region: westeurope"* ]]
+  [ "$(curl_headers_mode 1)" = 600 ]
+  [[ "$(curl_args 1)" != *mskey* ]]
   [ "$(jq_field "$(curl_body 1)" '.[0].Text')" = "hello world" ]
 }
 
@@ -41,7 +43,15 @@ lookup_reply() {
   write_config '{"provider":"microsoft","keys":{"microsoft":"mskey"}}'
   microsoft_translate_reply "привет"
   translate_stdin "hello world"
-  [[ "$(curl_args 1)" != *Region* ]]
+  [[ "$(curl_headers 1)" != *Region* ]]
+}
+
+@test "a key containing a line break is rejected instead of splitting into two headers" {
+  write_config '{"provider":"microsoft","keys":{"microsoft":"mskey\nX-Injected: 1"}}'
+  translate_stdin "hello world"
+  [ "$status" -eq 1 ]
+  [ "$(jq_field "$output" .error)" = network ]
+  [ "$(curl_calls)" -eq 0 ]
 }
 
 @test "a word triggers a dictionary lookup with the detected language" {
