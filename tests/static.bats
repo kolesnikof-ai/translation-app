@@ -118,10 +118,10 @@ MANIFEST="$REPO_ROOT/manifest.json"
 @test "the panel's copy helper delivers the text intact and keeps it out of wl-copy's environment" {
   setup_env
   local snippet text
-  snippet=$(grep -oE 'command: \["bash", "-c", "text=\$OMARCHY_TRANSLATE_CLIP[^]]*"\]' "$REPO_ROOT/Panel.qml" \
+  snippet=$(grep -oE 'command: \["bash", "-c", "printf %s \\"\$OMARCHY_TRANSLATE_CLIP\\"[^]]*"\]' "$REPO_ROOT/Panel.qml" \
     | sed -E 's/^command: \["bash", "-c", "//; s/"\]$//; s/\\"/"/g')
   [ -n "$snippet" ]
-  text=$'multi line\n"quoted" $HOME `date` \\ end'
+  text=$'multi line\n"quoted" $HOME `date` $(echo PWNED) \\ end'
   OMARCHY_TRANSLATE_CLIP=$text run bash -c "$snippet"
   [ "$status" -eq 0 ]
   [ "$(cat "$MOCK_DIR/clipboard")" = "$text" ]

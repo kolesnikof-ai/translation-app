@@ -181,11 +181,12 @@ Item {
 
   // A detached process has no stdin and command-line arguments are readable by
   // every local user, so the text travels in the process environment (readable
-  // by the owner only). The helper drops the variable before wl-copy starts, so
-  // the long-lived wl-copy process does not keep it either.
+  // by the owner only). The expansion is quoted, so a translation that contains
+  // shell syntax stays text. The helper drops the variable before wl-copy
+  // starts, so the long-lived wl-copy process does not keep it either.
   Process {
     id: copyProc
-    command: ["bash", "-c", "text=$OMARCHY_TRANSLATE_CLIP; unset OMARCHY_TRANSLATE_CLIP; printf %s \"$text\" | wl-copy"]
+    command: ["bash", "-c", "printf %s \"$OMARCHY_TRANSLATE_CLIP\" | { unset OMARCHY_TRANSLATE_CLIP; wl-copy; }"]
   }
 
   // Super+C is rebound by Omarchy to "universal copy": the compositor sends
